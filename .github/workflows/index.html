@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Реальный чат с голосовым вводом</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f0f0; margin: 0; padding: 0; display: flex; justify-content: center; }
+        #chat-container { width: 90%; max-width: 800px; background: white; height: 100vh; display: flex; flex-direction: column; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        #header { padding: 10px; background: #007bff; color: white; text-align: center; font-size: 1.2em; }
+        #messages { flex: 1; padding: 20px; overflow-y: auto; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 10px; max-width: 80%; }
+        .my-message { background: #007bff; color: white; align-self: flex-end; margin-left: auto; }
+        .other-message { background: #e9ecef; align-self: flex-start; }
+        .nick { font-weight: bold; font-size: 0.9em; }
+        .system { font-style: italic; color: #666; text-align: center; font-size: 0.9em; }
+        #input-area { display: flex; padding: 10px; background: #f8f8f8; border-top: 1px solid #ddd; }
+        #message-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; font-size: 16px; }
+        #voice-btn { margin-left: 10px; padding: 10px; background: #28a745; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 20px; }
+        #voice-btn.recording { background: #dc3545; }
+        #send-btn { margin-left: 10px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 20px; cursor: pointer; }
+        #online { text-align: center; padding: 5px; background: #f1f1f1; font-size: 0.9em; color: #555; }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div id="header">Реальный чат</div>
+        <div id="online">Онлайн: <span id="users-count">0</span> чел.</div>
+        <div id="messages"></div>
+        <div id="input-area">
+            <input type="text" id="message-input" placeholder="Введите сообщение..." autocomplete="off">
+            <button id="voice-btn">🎤</button>
+            <button id="send-btn">Отправить</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        let nickname = localStorage.getItem('chat_nickname');
+        if (!nickname) {
+            nickname = prompt('Введите ваш ник:');
+            if (!nickname || nickname.trim() === '') nickname = 'Аноним';
+            localStorage.setItem('chat_nickname', nickname.trim());
+        }
+        socket.emit('set nickname', nickname);
+
+        const messages = document.getElementById('messages');
+        const input = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const voiceBtn = document.getElementById('voice-btn');
+        const onlineCount = document.getElementById('users-count');
+
+        // Голосовой ввод
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ru-RU';
+            recognition.interimResults = true;
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                }
+                input.value = transcript.trim();
+            };
+
+            recognition.onend = () => voiceBtn.classList.remove('recording');
+        } else {
+            voiceBtn.style.display = 'none';
+        }
+
+        voiceBtn.addEventListener('click', () => {
+            if (recognition) {
+                if (voiceBtn.classList.contains('recording')) {
+                    recognition.stop();
+                } else {
+                    recognition.start();
+                    voiceBtn.classList.add('recording');
+                }
+            }
+        });
+
+        function addMessage(nick, text, isMy = false) {
+            const div = document.createElement('div');
+            div.classList.add('message', isMy ? 'my-message' : 'other-message');
+            div.innerHTML = `<span class="nick">${nick}: </span>${text}`;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function addSystem(msg) {
+            const div = document.createElement('div');
+            div.classList.add('system');
+            div.textContent = msg;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        socket.on('chat message', (data) => {
+            const isMy = data.nick === nickname;
+            addMessage(data.nick, data.text, isMy);
+        });
+
+        socket.on('user joined', (nick) => {
+            addSystem(`${nick} зашёл в чат`);
+        });
+
+        socket.on('user left', (nick) => {
+            addSystem(`${nick} вышел из чата`);
+        });
+
+        socket.on('update users', (users) => {
+            onlineCount.textContent = users.length;
+        });
+
+        sendBtn.onclick = () => sendMessage();
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        function sendMessage() {
+            const text = input.value.trim();
+            if (text) {
+                socket.emit('chat message', text);
+                input.value = '';
+            }
+        }
+    </script>
+</body>
+  </html>
